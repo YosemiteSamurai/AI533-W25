@@ -7,17 +7,21 @@
 
 my $implementation = $ARGV[0];
 
-if ($implentation eq "S") {print "Implementation: Part A1, SARSA\n\n";}
-elsif ($implentation eq "Ql") {print "Implementation: Part A2, Q-learning\n\n";}
-elsif ($implentation eq "Sl") {print "Implementation: Part A3, SARSA(lambda)\n\n";}
-elsif ($implentation eq "AC") {print "Implementation: Part B1, Actor-Critic\n\n";}
+if ($implementation eq "S") {print "Implementation: Part A1, SARSA\n\n";}
+elsif ($implementation eq "Ql") {print "Implementation: Part A2, Q-learning\n\n";}
+elsif ($implementation eq "Sl") {print "Implementation: Part A3, SARSA(lambda)\n\n";}
+elsif ($implementation eq "AC") {print "Implementation: Part B1, Actor-Critic\n\n";}
 else {die "Invalid argument! Must be S, Ql, Sl, or AC.";}
 
 my $gamma = 0.95;  # the discount factor
 my $alpha = 0.5;   # the learning rate
 my $epsilon = 0.4; # the exploration probability
+my $lambda = 0.9;
 
-print "Hyperparameters:\nGamma = $gamma\nAlpha = $alpha\nEpsilon = $epsilon\n\n";
+print "Hyperparameters:\nGamma = $gamma\nAlpha = $alpha\nEpsilon = $epsilon\n";
+
+if ($implementation eq "Sl") {print "Lambda = $lambda\n"}
+print "\n";
 
 # Define grid size, start state, and terminal state
 my $max_x = 3;
@@ -29,6 +33,9 @@ my $terminal_y = 3;
 
 my %states;
 my %qvalues;
+my %policy;
+my %value_function;
+my %eligibility_trace;
 
 # Initialize states / rewards to default values
 for (my $y = 0; $y <= $max_y; $y++) {for (my $x = 0; $x <= $max_x; $x++) {$states{$x}{$y}{'R'} = -1;}}
@@ -58,16 +65,76 @@ for (my $x = 0; $x <= $max_x; $x++) {for (my $y = 0; $y <= $max_y; $y++)
 
 my $converged = 0;
 
-while ($converged == 0) {
+while (!$converged) {
 	
     my $x = $start_x;
     my $y = $start_y;
     my $at_terminal_state = 0;
     my $t = 0;
 
-    while ($at_terminal_state == 0) {
+    while (!$at_terminal_state) {
 	
-        ($x, $y) = &take_action($x, $y, $states{$x}{$y}{'A'});
+        if ($implementation eq "S") {
+
+            my ($xp, $yp) = take_action($x, $y, $a);
+            my $ap = select_action($xp, $yp);
+            my $reward = $states{$xp}{$yp}{'R'};
+
+            $qvalues{$x}{$y}{$a} += $alpha * ($reward + $gamma * $qvalues{$xp}{$yp}{$ap} - $qvalues{$x}{$y}{$a});
+
+            ($x, $y, $a) = ($xp, $yp, $ap);
+
+        }
+
+        elsif ($implementation eq "Ql") {
+
+            my $a = select_action($x, $y);
+            my ($xp, $yp) = take_action($x, $y, $a);
+            my $reward = $states{$xp}{$yp}{'R'};
+            my $ap = select_action($xp, $yp);
+
+            $qvalues{$x}{$y}{$a} += $alpha * ($reward + $gamma * max_qvalue($xp, $yp) - $qvalues{$x}{$y}{$a});
+
+            ($x, $y) = ($xp, $yp);
+        }
+
+        elsif ($implementation eq "Sl") {
+
+            my $a = select_action($x, $y);
+            my ($xp, $yp) = take_action($x, $y, $a);
+            my $ap = select_action($xp, $yp);
+            my $reward = $states{$xp}{$yp}{'R'};
+
+            $eligibility_trace{$x}{$y}{$a} += 1;
+
+            my $delta = $reward + $gamma * $qvalues{$xp}{$yp}{$ap} - $qvalues{$x}{$y}{$a};
+
+            foreach my $sx (keys %qvalues) {
+                foreach my $sy (keys %{$qvalues{$sx}}) {
+                    foreach my $sa (keys %{$qvalues{$sx}{$sy}}) {
+                        $qvalues{$sx}{$sy}{$sa} += $alpha * $delta * $eligibility_trace{$sx}{$sy}{$sa};
+                        $eligibility_trace{$sx}{$sy}{$sa} *= $gamma * $lambda;
+                    }
+                }
+            }
+
+            ($x, $y, $a) = ($xp, $yp, $ap);
+
+        }
+
+        elsif ($implementation eq "AC") {
+
+            my $a = select_action($x, $y);
+            my ($xp, $yp) = take_action($x, $y, $a);
+            my $reward = $states{$xp}{$yp}{'R'};
+
+            my $delta = $reward + $gamma * $value_function{$xp}{$yp} - $value_function{$x}{$y};
+
+            $value_function{$x}{$y} += $alpha * $delta;
+            $policy{$x}{$y}{$a} += $alpha * $delta;
+
+            ($x, $y) = ($xp, $yp);
+        }
    
         if (($x == $terminal_x) && ($y == $terminal_y)) {$at_terminal_state = 1;}
 
@@ -150,4 +217,15 @@ sub left { # Returns the next state when going left
     elsif ($rand_num > 0.8) {return ($x, $uy);}
     else {return ($lx, $y);}
 
+}
+
+sub max_qvalue {
+    my ($x, $y) = @_;
+    my $max_q = -9999;
+    foreach my $a (keys %{$qvalues{$x}{$y}}) {
+        if ($qvalues{$x}{$y}{$a} > $max_q) {
+            $max_q = $qvalues{$x}{$y}{$a};
+        }
+    }
+    return $max_q;
 }
